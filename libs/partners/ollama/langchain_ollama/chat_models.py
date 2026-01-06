@@ -658,6 +658,8 @@ class ChatOllama(BaseChatModel):
     format: Literal["", "json"] | JsonSchemaValue | None = None
     """Specify the format of the output (options: `'json'`, JSON schema)."""
 
+    response_format: Optional[Any] = None
+
     keep_alive: int | str | None = None
     """How long the model will stay loaded into memory."""
 
@@ -763,12 +765,34 @@ class ChatOllama(BaseChatModel):
                 if v is not None
             }
 
+        # Handle response_format parameter (OpenAI-style) and convert to Ollama's format
+        # This is used by create_agent when using ProviderStrategy or ToolStrategy
+        format_param = kwargs.pop("format", None)
+        response_format = kwargs.pop("response_format", None)
+
+        if response_format is not None:
+            # Convert OpenAI-style response_format to Ollama's format parameter
+            if isinstance(response_format, dict):
+                if (
+                    response_format.get("type") == "json_schema"
+                    and "json_schema" in response_format
+                ):
+                    json_schema_obj = response_format["json_schema"]
+                    if isinstance(json_schema_obj, dict) and "schema" in json_schema_obj:
+                        # Extract the actual JSON schema from the OpenAI-style structure
+                        # Ollama's format accepts the JSON schema dict directly
+                        if format_param is None:
+                            format_param = json_schema_obj["schema"]
+
+        # Use format_param if set, otherwise fall back to self.format
+        final_format = format_param if format_param is not None else self.format
+
         params = {
             "messages": ollama_messages,
             "stream": kwargs.pop("stream", True),
             "model": kwargs.pop("model", self.model),
             "think": kwargs.pop("reasoning", self.reasoning),
-            "format": kwargs.pop("format", self.format),
+            "format": final_format,
             "options": options_dict,
             "keep_alive": kwargs.pop("keep_alive", self.keep_alive),
             **kwargs,

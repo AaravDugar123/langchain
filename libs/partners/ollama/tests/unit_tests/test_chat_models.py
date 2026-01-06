@@ -473,3 +473,134 @@ def test_chat_ollama_ignores_strict_arg() -> None:
         # Check that 'strict' was NOT passed to the client
         call_kwargs = mock_client.chat.call_args[1]
         assert "strict" not in call_kwargs
+
+
+def test_chat_ollama_converts_response_format_to_format() -> None:
+    """Test that ChatOllama converts OpenAI-style response_format to Ollama's format parameter."""
+    response = [
+        {
+            "model": "test-model",
+            "created_at": "2025-01-01T00:00:00.000000000Z",
+            "done": True,
+            "done_reason": "stop",
+            "message": {"role": "assistant", "content": "Hello!"},
+        }
+    ]
+
+    with patch("langchain_ollama.chat_models.Client") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        mock_client.chat.return_value = response
+
+        llm = ChatOllama(model="test-model")
+
+        # Create OpenAI-style response_format (as used by ProviderStrategy)
+        json_schema = {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"},
+            },
+            "required": ["answer"],
+        }
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "Answer",
+                "schema": json_schema,
+                "strict": True,
+            },
+        }
+
+        # Invoke with response_format
+        llm.invoke([HumanMessage("Hello")], response_format=response_format)
+
+        # Check that 'response_format' was NOT passed to the client
+        call_kwargs = mock_client.chat.call_args[1]
+        assert "response_format" not in call_kwargs
+
+        # Check that 'format' was set to the extracted JSON schema
+        assert "format" in call_kwargs
+        assert call_kwargs["format"] == json_schema
+
+
+def test_chat_ollama_response_format_without_json_schema() -> None:
+    """Test that ChatOllama handles response_format without json_schema gracefully."""
+    response = [
+        {
+            "model": "test-model",
+            "created_at": "2025-01-01T00:00:00.000000000Z",
+            "done": True,
+            "done_reason": "stop",
+            "message": {"role": "assistant", "content": "Hello!"},
+        }
+    ]
+
+    with patch("langchain_ollama.chat_models.Client") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        mock_client.chat.return_value = response
+
+        llm = ChatOllama(model="test-model")
+
+        # Create invalid response_format (missing json_schema)
+        response_format = {
+            "type": "json_schema",
+        }
+
+        # Invoke with invalid response_format - should not crash
+        llm.invoke([HumanMessage("Hello")], response_format=response_format)
+
+        # Check that 'response_format' was NOT passed to the client
+        call_kwargs = mock_client.chat.call_args[1]
+        assert "response_format" not in call_kwargs
+
+        # Format should fall back to self.format (None by default)
+        assert call_kwargs["format"] is None
+
+
+def test_chat_ollama_explicit_format_overrides_response_format() -> None:
+    """Test that explicitly set format parameter takes precedence over response_format."""
+    response = [
+        {
+            "model": "test-model",
+            "created_at": "2025-01-01T00:00:00.000000000Z",
+            "done": True,
+            "done_reason": "stop",
+            "message": {"role": "assistant", "content": "Hello!"},
+        }
+    ]
+
+    with patch("langchain_ollama.chat_models.Client") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        mock_client.chat.return_value = response
+
+        llm = ChatOllama(model="test-model")
+
+        # Create response_format
+        json_schema_from_response_format = {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+        }
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "Answer",
+                "schema": json_schema_from_response_format,
+            },
+        }
+
+        # Explicitly set format parameter
+        explicit_format = {"type": "object", "properties": {"name": {"type": "string"}}}
+
+        # Invoke with both response_format and explicit format
+        llm.invoke(
+            [HumanMessage("Hello")],
+            response_format=response_format,
+            format=explicit_format,
+        )
+
+        # Check that explicit format takes precedence
+        call_kwargs = mock_client.chat.call_args[1]
+        assert call_kwargs["format"] == explicit_format
+        assert "response_format" not in call_kwargs
